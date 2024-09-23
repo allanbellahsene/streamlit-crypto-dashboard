@@ -18,6 +18,13 @@ from functools import lru_cache
 import sys
 import subprocess
 
+st.write(f"Python version: {sys.version}")
+st.write(f"Python executable: {sys.executable}")
+
+if sys.version_info < (3, 9):
+    st.error("This app requires Python 3.9 or newer. Please update your Python version.")
+    st.stop()
+
 def install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
