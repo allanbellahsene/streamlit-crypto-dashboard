@@ -14,6 +14,7 @@ import hashlib
 from functools import wraps
 import time
 from functools import lru_cache
+from dotenv import load_dotenv
 
 logging.basicConfig(filename='app.log', level=logging.ERROR)
 
@@ -36,19 +37,19 @@ class RateLimiter:
 
 
 def setup_binance_client():
-    api_key = st.secrets["BINANCE_API_KEY"]
-    api_secret = st.secrets["BINANCE_PRIVATE_KEY"]
-    
+    #api_key = st.secrets["BINANCE_API_KEY"]
+    #api_secret = st.secrets["BINANCE_PRIVATE_KEY"]
+    load_dotenv()
+    api_key = os.getenv("BINANCE_API_KEY")
+    api_secret = os.getenv("BINANCE_PRIVATE_KEY")
+
     if not api_key or not api_secret:
         st.error("Binance API keys are missing. Please set BINANCE_API_KEY and BINANCE_PRIVATE_KEY in your .env file.")
         st.stop()
     
     try:
-        client = Client(api_key, api_secret, tld='com')
-        client.API_URL = 'https://data.binance.com/api'  # Change the base URL
-        
-        # Perform a simple API call to test the connection
-        client.get_exchange_info()
+        client = Client(api_key, api_secret) # Change the base URL
+
         return client
     except Exception as e:
         st.error(f"Failed to initialize Binance client. Please check your API keys. Error: {str(e)}")
