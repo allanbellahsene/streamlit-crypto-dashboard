@@ -7,16 +7,19 @@ from datetime import datetime, timedelta
 from binance.client import Client
 import requests
 import re
-import os
 import traceback
 import logging
 import hashlib
 from functools import wraps
 import time
-from functools import lru_cache
 from requests.exceptions import RequestException
 
+# Setup logging
 logging.basicConfig(filename='app.log', level=logging.ERROR)
+
+# Rate Limiting Classes and Functions
+class RateLimitException(Exception):
+    pass
 
 class RateLimiter:
     def __init__(self, max_calls, period):
@@ -30,14 +33,12 @@ class RateLimiter:
             now = time.time()
             self.calls = [call for call in self.calls if call > now - self.period]
             if len(self.calls) >= self.max_calls:
-                raise Exception("Rate limit exceeded. Please try again later.")
+                raise RateLimitException("Rate limit exceeded. Please try again later.")
             self.calls.append(now)
             return func(*args, **kwargs)
         return wrapped
-    
-class RateLimitException(Exception):
-    pass
 
+@RateLimiter(max_calls=5, period=60)  # 5 calls per minute
 def rate_limited_request(url, params=None, max_retries=3, cooldown=60):
     for attempt in range(max_retries):
         try:
@@ -45,7 +46,7 @@ def rate_limited_request(url, params=None, max_retries=3, cooldown=60):
             response.raise_for_status()
             return response.json()
         except RequestException as e:
-            if response.status_code == 429:
+            if hasattr(e.response, 'status_code') and e.response.status_code == 429:
                 if attempt < max_retries - 1:
                     time.sleep(cooldown)
                 else:
@@ -53,64 +54,22 @@ def rate_limited_request(url, params=None, max_retries=3, cooldown=60):
             else:
                 raise e
 
-
-def setup_binance_client():
-    try:
-        client = Client()  # Initialize without API keys
-        return client
-    except Exception as e:
-        st.error(f"Failed to initialize Binance client. Error: {str(e)}")
-        st.stop()
-
-# Initialize the client
-client = setup_binance_client()
-
-def validate_inputs(start_date, end_date, btc_window, coin_window):
-    errors = []
-    
-    # Validate dates
-    if start_date >= end_date:
-        errors.append("Start date must be before end date.")
-    if end_date > datetime.now().date():
-        errors.append("End date cannot be in the future.")
-    if start_date < datetime(2009, 1, 3).date():  # Bitcoin's genesis block date
-        errors.append("Start date cannot be before January 3, 2009.")
-    
-    # Validate window sizes
-    if btc_window <= 0 or coin_window <= 0:
-        errors.append("Window sizes must be positive integers.")
-    if btc_window > 500 or coin_window > 500:
-        errors.append("Window sizes cannot exceed 500.")
-    
-    # Check if the date range is too large
-    if (end_date - start_date) > timedelta(days=365*7):
-        errors.append("Date range cannot exceed 7 years.")
-    
-    return errors
-
+# Error Handling Function
 def handle_error(error):
-    # Generate a unique error ID
     error_id = hashlib.md5(str(error).encode()).hexdigest()[:8]
-    
-    # Log the full error for debugging
     logging.error(f"Error ID {error_id}: {str(error)}\n{traceback.format_exc()}")
-    
-    # Sanitize the error message
     sanitized_error = re.sub(r'File ".*?"', 'File "..."', str(error))
     sanitized_error = re.sub(r'(api_key|secret|password)=\S+', r'\1=***', sanitized_error, flags=re.IGNORECASE)
     sanitized_error = re.sub(r'\S+@\S+\.\S+', 'email@example.com', sanitized_error)
     sanitized_error = re.sub(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', 'xxx.xxx.xxx.xxx', sanitized_error)
-    
-    # Display a user-friendly error message
     st.error(f"An unexpected error occurred. If this persists, please contact support with Error ID: {error_id}")
-    
     # For debugging in development, uncomment the line below:
     # st.error(f"Debug info: {sanitized_error}")
 
-# Set page config for dark theme
+# Initialize Streamlit App
 st.set_page_config(page_title="QuantiFi Momentum Crypto Dashboard", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 
-# Custom CSS for dark theme with improved readability
+# Custom CSS for Dark Theme
 st.markdown("""
 <style>
     .stApp {
@@ -122,15 +81,7 @@ st.markdown("""
         border-color: #FF1493;
         background-color: #2D2D2D;
     }
-    .stSelectbox>div>div>select {
-        color: #FF1493;
-        background-color: #2D2D2D;
-    }
-    .stDateInput>div>div>input {
-        color: #FF1493;
-        background-color: #2D2D2D;
-    }
-    .stNumberInput>div>div>input {
+    .stSelectbox>div>div>select, .stDateInput>div>div>input, .stNumberInput>div>div>input {
         color: #FF1493;
         background-color: #2D2D2D;
     }
@@ -173,89 +124,91 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-class RateLimitException(Exception):
-    pass
-
-def rate_limited_request(url, params=None, max_retries=3, cooldown=60):
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, params=params)
-            response.raise_for_status()
-            return response.json()
-        except RequestException as e:
-            if response.status_code == 429:
-                if attempt < max_retries - 1:
-                    time.sleep(cooldown)
-                else:
-                    raise RateLimitException("Rate limit exceeded after max retries")
-            else:
-                raise e
-
-@st.cache_data(ttl=3600)  # Cache the result for 1 hour
+# Cached Function to Fetch Top 50 Cryptocurrencies
+@st.cache_data(ttl=3600)
 def fetch_top_50_cryptos():
     try:
         url = "https://api.coingecko.com/api/v3/coins/markets"
         params = {
             "vs_currency": "usd",
             "order": "market_cap_desc",
-            "per_page": 100,
+            "per_page": 100,  # Fetch top 100 to filter out stablecoins
             "page": 1,
             "sparkline": False
         }
-        
         data = rate_limited_request(url, params)
-        
         if not isinstance(data, list):
             raise ValueError("Unexpected data format from API")
-        
         stablecoins = ['USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'USDP', 'USDN', 'LEOUSDT']
         filtered_data = [coin for coin in data if isinstance(coin, dict) and coin.get('symbol', '').upper() not in stablecoins]
-        
         return {coin.get('name', f"Unknown {i}"): f"{coin.get('symbol', '').upper()}USDT" for i, coin in enumerate(filtered_data[:50])}
     except RateLimitException as e:
-        st.error(f"Rate limit exceeded when fetching top cryptocurrencies. Please try again later.")
+        st.error("Rate limit exceeded when fetching top cryptocurrencies. Please try again later.")
         return {"Bitcoin": "BTCUSDT", "Ethereum": "ETHUSDT"}  # Fallback options
     except Exception as e:
         st.error(f"Error fetching top cryptocurrencies: {str(e)}")
         return {"Bitcoin": "BTCUSDT", "Ethereum": "ETHUSDT"}  # Fallback options
 
-@RateLimiter(max_calls=5, period=60)  # 5 calls per minute
-def import_binance_data(symbol, start_date, end_date, interval='1d', contract='spot'):
+# Function to Initialize Binance Client (Lazy Initialization)
+def setup_binance_client():
+    try:
+        client = Client()  # Initialize without API keys
+        return client
+    except Exception as e:
+        st.error(f"Failed to initialize Binance client. Error: {str(e)}")
+        st.stop()
+
+# Cached Function to Import Binance Data
+@st.cache_data(ttl=3600, allow_output_mutation=True)
+def import_binance_data(client, symbol, start_date, end_date, interval='1d', contract='spot'):
     start_str = start_date.strftime('%Y-%m-%d')
     end_str = end_date.strftime('%Y-%m-%d')
-    
     try:
         if contract == 'futures':
-            df = client.futures_historical_klines(symbol, interval=interval, start_str=start_str, end_str=end_str)
+            klines = client.futures_historical_klines(symbol, interval, start_str, end_str)
         else:
-            df = client.get_historical_klines(symbol, interval=interval, start_str=start_str, end_str=end_str)
-        
-        df = pd.DataFrame(df, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume', 'Close time', 'Quote asset volume', 'Number of trades', 'Taker buy base asset volume', 'Taker buy quote asset volume', 'Ignore'])
-        df = df.drop(['Close time', 'Quote asset volume', 'Number of trades', 'Taker buy base asset volume', 'Taker buy quote asset volume', 'Ignore'], axis=1)
+            klines = client.get_historical_klines(symbol, interval, start_str, end_str)
+        df = pd.DataFrame(klines, columns=[
+            'timestamp', 'Open', 'High', 'Low', 'Close', 'Volume',
+            'Close time', 'Quote asset volume', 'Number of trades',
+            'Taker buy base asset volume', 'Taker buy quote asset volume', 'Ignore'
+        ])
+        df = df.drop(['Close time', 'Quote asset volume', 'Number of trades',
+                      'Taker buy base asset volume', 'Taker buy quote asset volume', 'Ignore'], axis=1)
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
         for col in df.columns:
-            df[col] = df[col].astype(float)
+            df[col] = pd.to_numeric(df[col], errors='coerce')
         return df
     except Exception as e:
-        st.error(f"Error fetching data for {symbol}: {str(e)}")
-        return None
+        raise Exception(f"Error fetching data for {symbol}: {str(e)}")
 
-def calculate_signals(df, btc_window, coin_window):
-    try:
-        btc_data = import_binance_data("BTCUSDT", df.index[0], df.index[-1], interval=interval, contract=contract)
-        if btc_data is None:
-            raise ValueError("Failed to fetch BTC data")
-        
-        df['BTC'] = btc_data['Close']
-        df['BTC_MA'] = df['BTC'].rolling(window=btc_window).mean()
-        df['Coin_MA'] = df['Close'].rolling(window=coin_window).mean()
-        df['Signal'] = np.where((df['BTC'] > df['BTC_MA']) & (df['Close'] > df['Coin_MA']), 1, 0)
-        return df
-    except Exception as e:
-        st.error(f"An error occurred while calculating signals: {str(e)}")
-        return None
+# Function to Validate User Inputs
+def validate_inputs(start_date, end_date, btc_window, coin_window):
+    errors = []
+    if start_date >= end_date:
+        errors.append("Start date must be before end date.")
+    if end_date > datetime.now().date():
+        errors.append("End date cannot be in the future.")
+    if start_date < datetime(2009, 1, 3).date():  # Bitcoin's genesis block date
+        errors.append("Start date cannot be before January 3, 2009.")
+    if btc_window <= 0 or coin_window <= 0:
+        errors.append("Window sizes must be positive integers.")
+    if btc_window > 500 or coin_window > 500:
+        errors.append("Window sizes cannot exceed 500.")
+    if (end_date - start_date) > timedelta(days=365*7):
+        errors.append("Date range cannot exceed 7 years.")
+    return errors
 
+# Function to Calculate Trading Signals
+def calculate_signals(df, btc_data, btc_window, coin_window):
+    df['BTC'] = btc_data['Close']
+    df['BTC_MA'] = df['BTC'].rolling(window=btc_window).mean()
+    df['Coin_MA'] = df['Close'].rolling(window=coin_window).mean()
+    df['Signal'] = np.where((df['BTC'] > df['BTC_MA']) & (df['Close'] > df['Coin_MA']), 1, 0)
+    return df
+
+# Function to Backtest Strategy
 def backtest_strategy(df):
     df['Strategy_Return'] = df['Close'].pct_change() * df['Signal'].shift(2)
     df['Buy_Hold_Return'] = df['Close'].pct_change()
@@ -263,11 +216,12 @@ def backtest_strategy(df):
     df['Buy_Hold_Equity'] = (1 + df['Buy_Hold_Return']).cumprod()
     return df
 
+# Function to Calculate Performance Metrics
 def calculate_metrics(df):
     strategy_return = df['Strategy_Equity'].iloc[-1] - 1
     buy_hold_return = df['Buy_Hold_Equity'].iloc[-1] - 1
-    strategy_sharpe = np.sqrt(252) * df['Strategy_Return'].mean() / df['Strategy_Return'].std()
-    buy_hold_sharpe = np.sqrt(252) * df['Buy_Hold_Return'].mean() / df['Buy_Hold_Return'].std()
+    strategy_sharpe = np.sqrt(252) * df['Strategy_Return'].mean() / df['Strategy_Return'].std() if df['Strategy_Return'].std() != 0 else 0
+    buy_hold_sharpe = np.sqrt(252) * df['Buy_Hold_Return'].mean() / df['Buy_Hold_Return'].std() if df['Buy_Hold_Return'].std() != 0 else 0
     strategy_max_drawdown = (df['Strategy_Equity'] / df['Strategy_Equity'].cummax() - 1).min()
     buy_hold_max_drawdown = (df['Buy_Hold_Equity'] / df['Buy_Hold_Equity'].cummax() - 1).min()
     
@@ -280,6 +234,7 @@ def calculate_metrics(df):
         'Buy & Hold Max Drawdown': f'{buy_hold_max_drawdown:.2%}'
     }
 
+# Function to Plot Equity Curves
 def plot_equity_curves(df):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df['Strategy_Equity'], mode='lines', name='Strategy', line=dict(color='#FF1493', width=2)))
@@ -300,53 +255,50 @@ def plot_equity_curves(df):
     )
     return fig
 
+# Function to Plot Signals and Price
 def plot_signals_and_price(df, ticker):
-    # Use the entire dataframe or last 365 days, whichever is shorter
     last_365_days = df.tail(min(365, len(df)))
-    
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
     
     # Price and MA plot
     fig.add_trace(go.Scatter(x=last_365_days.index, y=last_365_days['Close'], mode='lines', name=f'{ticker} Price', line=dict(color='#FFFFFF')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=last_365_days.index, y=last_365_days['Coin_MA'], mode='lines', name='MA(50)', line=dict(color='#FFA500')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=last_365_days.index, y=last_365_days['Coin_MA'], mode='lines', name=f'MA({last_365_days["Coin_MA"].rolling(window=50).mean().count()})', line=dict(color='#FFA500')), row=1, col=1)
     
-    # Find actual buy and sell signals
+    # Buy and Sell Signals
     signal_changes = last_365_days['Signal'].diff().fillna(0)
     buy_signals = last_365_days[signal_changes == 1]
     sell_signals = last_365_days[signal_changes == -1]
     
-    # Buy signals (green triangles)
     fig.add_trace(go.Scatter(
         x=buy_signals.index, y=buy_signals['Close'],
         mode='markers', name='Buy Signal',
         marker=dict(symbol='triangle-up', size=10, color='green'),
     ), row=1, col=1)
     
-    # Sell signals (red triangles)
     fig.add_trace(go.Scatter(
         x=sell_signals.index, y=sell_signals['Close'],
         mode='markers', name='Sell Signal',
         marker=dict(symbol='triangle-down', size=10, color='red'),
     ), row=1, col=1)
     
-    # Bitcoin regime filter
+    # Bitcoin Regime Filter
     btc_above_ma = last_365_days['BTC'] > last_365_days['BTC_MA']
     fig.add_trace(go.Scatter(
         x=last_365_days.index, y=last_365_days['BTC'],
-        fill='tozeroy', fillcolor='rgba(0, 255, 0, 0.1)', # Green for bull market
+        fill='tozeroy', fillcolor='rgba(0, 255, 0, 0.1)',  # Green for bull market
         line=dict(color='rgba(0, 0, 0, 0)'), name='Bull Market',
         showlegend=False
     ), row=2, col=1)
     fig.add_trace(go.Scatter(
         x=last_365_days.index, y=last_365_days['BTC'].where(~btc_above_ma),
-        fill='tozeroy', fillcolor='rgba(255, 0, 0, 0.1)', # Red for bear market
+        fill='tozeroy', fillcolor='rgba(255, 0, 0, 0.1)',  # Red for bear market
         line=dict(color='rgba(0, 0, 0, 0)'), name='Bear Market',
         showlegend=False
     ), row=2, col=1)
     fig.add_trace(go.Scatter(x=last_365_days.index, y=last_365_days['BTC'], mode='lines', name='BTC Price', line=dict(color='#FFFFFF')), row=2, col=1)
     fig.add_trace(go.Scatter(x=last_365_days.index, y=last_365_days['BTC_MA'], mode='lines', name='BTC MA(100)', line=dict(color='#FFA500')), row=2, col=1)
     
-    # Add rectangles for legend
+    # Add Legends for Bull and Bear Markets
     fig.add_trace(go.Scatter(
         x=[last_365_days.index[0]], y=[last_365_days['BTC'].max()],
         mode='markers', marker=dict(size=15, color='rgba(0, 255, 0, 0.1)', symbol='square'),
@@ -375,6 +327,7 @@ def plot_signals_and_price(df, ticker):
     
     return fig
 
+# Function to Display Disclaimer
 def display_disclaimer():
     st.markdown("""
     ## Disclaimer and Terms of Use
@@ -398,67 +351,88 @@ def display_disclaimer():
     By using this application, you acknowledge that you have read, understood, and agree to these terms and conditions.
     """)
 
+# Main Application Logic
+def main():
+    try:
+        st.markdown("<h1 class='pink-title'>QuantiFi Momentum Crypto Dashboard</h1>", unsafe_allow_html=True)
+        display_disclaimer()
 
-# Main app logic
-try:
-    st.markdown("<h1 class='pink-title'>QuantiFi Momentum Crypto Dashboard</h1>", unsafe_allow_html=True)
+        # Start a form to collect all inputs
+        with st.form("backtest_form"):
+            # Fetch top 50 cryptos once and cache
+            crypto_options = fetch_top_50_cryptos()
+            default_options = {"Bitcoin": "BTCUSDT", "Ethereum": "ETHUSDT"}
+            crypto_options = {**default_options, **crypto_options}  # Ensure default options are always present
 
-    display_disclaimer()
+            # Input Widgets
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                selected_crypto = st.selectbox('Select a cryptocurrency', list(crypto_options.keys()))
+            with col2:
+                contract = st.selectbox('Contract Type', ['spot', 'futures'])
+            with col3:
+                interval = st.selectbox('Data Frequency', ['1d', '4h', '1h'])
 
-    # Use a dictionary for default options
-    default_options = {"Bitcoin": "BTCUSDT", "Ethereum": "ETHUSDT"}
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        selected_crypto = st.selectbox('Select a cryptocurrency', list(default_options.keys()))
-    with col2:
-        contract = st.selectbox('Contract Type', ['spot', 'futures'])
-    with col3:
-        interval = st.selectbox('Data Frequency', ['1d', '4h', '1h'])
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                start_date = st.date_input('Start Date', datetime(2020, 1, 1))
+            with col2:
+                end_date = st.date_input('End Date', datetime.now())
+            with col3:
+                btc_window = st.number_input('Regime Filter Window (# of bars)', min_value=1, max_value=500, value=100)
+            with col4:
+                coin_window = st.number_input('Coin-specific Window (# of bars)', min_value=1, max_value=500, value=50)
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        start_date = st.date_input('Start Date', datetime(2020, 1, 1))
-    with col2:
-        end_date = st.date_input('End Date', datetime.now())
-    with col3:
-        btc_window = st.number_input('Regime Filter Window (# of bars)', min_value=1, max_value=500, value=100)
-    with col4:
-        coin_window = st.number_input('Coin-specific Window (# of bars)', min_value=1, max_value=500, value=50)
-    
-    errors = validate_inputs(start_date, end_date, btc_window, coin_window)
+            # Submit Button
+            submit_button = st.form_submit_button("Run Backtest")
 
-    if errors:
-        for error in errors:
-            st.error(error)
-        st.stop()
+        if submit_button:
+            # Validate Inputs
+            errors = validate_inputs(start_date, end_date, btc_window, coin_window)
+            if errors:
+                for error in errors:
+                    st.error(error)
+                st.stop()
 
-    if st.button('Run Backtest'):
-        # Only fetch the top 50 cryptos when the button is pressed
-        crypto_options = fetch_top_50_cryptos()
-        
-        # Use the fetched options or fall back to the default if there was an error
-        ticker = crypto_options.get(selected_crypto, default_options.get(selected_crypto))
-        
-        with st.spinner('Fetching data...'):
-            df = import_binance_data(ticker, start_date, end_date, interval, contract)
-        
-        if df is not None and not df.empty:
-            with st.spinner('Calculating signals...'):
-                df = calculate_signals(df, btc_window=btc_window, coin_window=coin_window)
-            if df is not None:
+            # Initialize Binance Client
+            client = setup_binance_client()
+
+            # Determine the ticker symbol
+            ticker = crypto_options.get(selected_crypto, "BTCUSDT")  # Fallback to BTCUSDT if not found
+
+            # Fetch Data
+            try:
+                with st.spinner('Fetching data...'):
+                    df = import_binance_data(client, ticker, start_date, end_date, interval, contract)
+                st.success("Data fetched successfully!")
+
+                # Fetch BTC Data for Regime Filter
+                with st.spinner('Fetching BTC data for regime filter...'):
+                    btc_df = import_binance_data(client, "BTCUSDT", start_date, end_date, interval, contract)
+                st.success("BTC data fetched successfully!")
+
+                # Calculate Signals
+                with st.spinner('Calculating signals...'):
+                    df = calculate_signals(df, btc_df, btc_window, coin_window)
+                st.success("Signals calculated successfully!")
+
+                # Run Backtest
                 with st.spinner('Running backtest...'):
                     df = backtest_strategy(df)
-                
+                st.success("Backtest completed successfully!")
+
+                # Plot Equity Curves
                 st.plotly_chart(plot_equity_curves(df), use_container_width=True)
-                
+
+                # Calculate and Display Metrics
                 metrics = calculate_metrics(df)
                 col1, col2, col3 = st.columns(3)
-                for i, (col, metrics_pair) in enumerate(zip([col1, col2, col3], [
+                metrics_pairs = [
                     ('Strategy Return', 'Buy & Hold Return'),
                     ('Strategy Sharpe', 'Buy & Hold Sharpe'),
                     ('Strategy Max Drawdown', 'Buy & Hold Max Drawdown')
-                ])):
+                ]
+                for col, metrics_pair in zip([col1, col2, col3], metrics_pairs):
                     with col:
                         for metric in metrics_pair:
                             st.markdown(f"""
@@ -467,7 +441,8 @@ try:
                                 <div class="metric-value">{metrics[metric]}</div>
                             </div>
                             """, unsafe_allow_html=True)
-                
+
+                # Display Signals for Last 30 Days
                 st.subheader("Signals for Last 30 Days")
                 last_30_days = df.tail(30).reset_index()
                 last_30_days['Date'] = last_30_days['timestamp'].dt.date
@@ -475,14 +450,20 @@ try:
                 last_30_days = last_30_days[['Date', 'Close', 'Signal']].sort_values('Date', ascending=False)
                 last_30_days.columns = ['Date', 'Price', 'Signal']
                 st.dataframe(last_30_days.style.applymap(lambda _: 'font-weight: bold', subset=['Signal']).format({'Price': '${:.2f}'}))
-                
+
+                # Plot Signals and Price
                 st.plotly_chart(plot_signals_and_price(df, ticker), use_container_width=True)
-            else:
-                st.warning("Unable to calculate signals. Please try different parameters or a different cryptocurrency.")
-        else:
-            st.warning("No data available for the selected parameters. Please try a different cryptocurrency, date range, or contract type.")
 
-except Exception as e:
-    handle_error(e)
+            except Exception as e:
+                handle_error(e)
 
-st.write("Note: This app uses a simple momentum strategy based on moving averages. The strategy parameters are measured in bars, not days. Always do your own research before making investment decisions. None of this is financial advice.")
+    except Exception as e:
+        handle_error(e)
+
+    # Final Note
+    st.write("""
+    Note: This app uses a simple momentum strategy based on moving averages. The strategy parameters are measured in bars, not days. Always do your own research before making investment decisions. **None of this is financial advice.**
+    """)
+
+if __name__ == "__main__":
+    main()
