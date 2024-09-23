@@ -1,10 +1,28 @@
+# Date handling
 python-dateutil==2.8.2
+
+# Streamlit for building the dashboard
 streamlit==1.22.0
+
+# Data handling and numerical computations
 pandas==1.5.3
-numpy==1.24.3
+numpy==1.24.4
+
+# Plotting library
 plotly==5.14.1
+
+# Binance API integration
 python-binance==1.0.17
+
+# HTTP requests
 requests==2.30.0
+
+# Environment variable management
 python-dotenv==1.0.0
-setuptools>=65.5.0
-wheel>=0.38.0
+
+# Ensure setuptools and wheel versions for building dependencies
+setuptools==67.6.1
+wheel==0.40.0
+
+# Add distutils explicitly if needed (to avoid the missing module error)
+distlib==0.3.7
