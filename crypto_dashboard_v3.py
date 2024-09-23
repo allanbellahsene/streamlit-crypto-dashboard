@@ -15,6 +15,16 @@ import hashlib
 from functools import wraps
 import time
 from functools import lru_cache
+import sys
+import subprocess
+
+def install(package):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+try:
+    import setuptools
+except ImportError:
+    install('setuptools')
 
 logging.basicConfig(filename='app.log', level=logging.ERROR)
 
