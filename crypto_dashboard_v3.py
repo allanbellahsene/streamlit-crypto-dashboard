@@ -37,25 +37,14 @@ class RateLimiter:
 
 
 def setup_binance_client():
-    #api_key = st.secrets["BINANCE_API_KEY"]
-    #api_secret = st.secrets["BINANCE_PRIVATE_KEY"]
-    load_dotenv()
-    api_key = os.getenv("BINANCE_API_KEY")
-    api_secret = os.getenv("BINANCE_PRIVATE_KEY")
-
-    if not api_key or not api_secret:
-        st.error("Binance API keys are missing. Please set BINANCE_API_KEY and BINANCE_PRIVATE_KEY in your .env file.")
-        st.stop()
-    
     try:
-        client = Client(api_key, api_secret) # Change the base URL
-
+        client = Client()  # Initialize without API keys
         return client
     except Exception as e:
-        st.error(f"Failed to initialize Binance client. Please check your API keys. Error: {str(e)}")
+        st.error(f"Failed to initialize Binance client. Error: {str(e)}")
         st.stop()
 
-# Use this function at the beginning of your main app logic
+# Initialize the client
 client = setup_binance_client()
 
 def validate_inputs(start_date, end_date, btc_window, coin_window):
