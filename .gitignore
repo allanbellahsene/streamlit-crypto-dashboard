@@ -169,8 +169,7 @@ pylint.log
 # Streamlit credentials and cache
 ~/.streamlit/credentials.toml
 ~/.streamlit/secrets.toml
-~/.streamlit/config.toml
-**/.streamlit/
+
 
 # Editor backup files
 *~

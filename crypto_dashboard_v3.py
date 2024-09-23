@@ -14,7 +14,7 @@ import hashlib
 from functools import wraps
 import time
 from functools import lru_cache
-from dotenv import load_dotenv
+from requests.exceptions import RequestException
 
 logging.basicConfig(filename='app.log', level=logging.ERROR)
 
@@ -34,6 +34,24 @@ class RateLimiter:
             self.calls.append(now)
             return func(*args, **kwargs)
         return wrapped
+    
+class RateLimitException(Exception):
+    pass
+
+def rate_limited_request(url, params=None, max_retries=3, cooldown=60):
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            return response.json()
+        except RequestException as e:
+            if response.status_code == 429:
+                if attempt < max_retries - 1:
+                    time.sleep(cooldown)
+                else:
+                    raise RateLimitException("Rate limit exceeded after max retries")
+            else:
+                raise e
 
 
 def setup_binance_client():
@@ -155,8 +173,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@RateLimiter(max_calls=10, period=60)  # 10 calls per minute, adjust as needed
-@lru_cache(maxsize=1) 
+@lru_cache(maxsize=1)
 def get_top_50_cryptos():
     try:
         url = "https://api.coingecko.com/api/v3/coins/markets"
@@ -167,9 +184,8 @@ def get_top_50_cryptos():
             "page": 1,
             "sparkline": False
         }
-        response = requests.get(url, params=params)
-        response.raise_for_status()  # Raise an exception for bad responses
-        data = response.json()
+        
+        data = rate_limited_request(url, params)
         
         if not isinstance(data, list):
             raise ValueError("Unexpected data format from API")
@@ -178,6 +194,9 @@ def get_top_50_cryptos():
         filtered_data = [coin for coin in data if isinstance(coin, dict) and coin.get('symbol', '').upper() not in stablecoins]
         
         return {coin.get('name', f"Unknown {i}"): f"{coin.get('symbol', '').upper()}USDT" for i, coin in enumerate(filtered_data[:50])}
+    except RateLimitException as e:
+        st.error(f"Rate limit exceeded when fetching top cryptocurrencies. Please try again later.")
+        return {"Bitcoin": "BTCUSDT", "Ethereum": "ETHUSDT"}  # Fallback options
     except Exception as e:
         st.error(f"Error fetching top cryptocurrencies: {str(e)}")
         return {"Bitcoin": "BTCUSDT", "Ethereum": "ETHUSDT"}  # Fallback options
