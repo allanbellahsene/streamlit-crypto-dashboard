@@ -16,6 +16,9 @@ import time
 from functools import lru_cache
 from requests.exceptions import RequestException
 
+# Set default port to 8501 if PORT is not set in the environment
+port = int(os.environ.get("PORT", 8501))
+
 logging.basicConfig(filename='app.log', level=logging.ERROR)
 
 class RateLimiter:
@@ -190,6 +193,50 @@ def rate_limited_request(url, params=None, max_retries=3, cooldown=60):
                     raise RateLimitException("Rate limit exceeded after max retries")
             else:
                 raise e
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@st.cache_data(ttl=3600)  # Cache the result for 1 hour
+def initialize_crypto_options():
+    logger.info("Initializing crypto options...")
+    try:
+        url = "https://api.coingecko.com/api/v3/coins/markets"
+        params = {
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": 100,
+            "page": 1,
+            "sparkline": False
+        }
+        
+        logger.info(f"Sending request to {url}")
+        data = rate_limited_request(url, params)
+        
+        if not isinstance(data, list):
+            logger.error(f"Unexpected data format from API: {type(data)}")
+            raise ValueError("Unexpected data format from API")
+        
+        logger.info(f"Received {len(data)} coins from API")
+        
+        stablecoins = ['USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'USDP', 'USDN', 'LEOUSDT']
+        filtered_data = [coin for coin in data if isinstance(coin, dict) and coin.get('symbol', '').upper() not in stablecoins]
+        
+        logger.info(f"Filtered to {len(filtered_data)} coins after removing stablecoins")
+        
+        result = {coin.get('name', f"Unknown {i}"): f"{coin.get('symbol', '').upper()}USDT" for i, coin in enumerate(filtered_data[:50])}
+        
+        logger.info(f"Final result contains {len(result)} coins")
+        return result
+    except RateLimitException as e:
+        logger.error(f"Rate limit exceeded: {str(e)}")
+        st.error(f"Rate limit exceeded when fetching top cryptocurrencies. Please try again later.")
+        return {"Bitcoin": "BTCUSDT", "Ethereum": "ETHUSDT"}  # Fallback options
+    except Exception as e:
+        logger.error(f"Error fetching top cryptocurrencies: {str(e)}", exc_info=True)
+        st.error(f"Error fetching top cryptocurrencies: {str(e)}")
+        return {"Bitcoin": "BTCUSDT", "Ethereum": "ETHUSDT"}  # Fallback options
 
 @st.cache_data(ttl=3600)  # Cache the result for 1 hour
 def fetch_top_50_cryptos():
@@ -219,11 +266,6 @@ def fetch_top_50_cryptos():
         st.error(f"Error fetching top cryptocurrencies: {str(e)}")
         return {"Bitcoin": "BTCUSDT", "Ethereum": "ETHUSDT"}  # Fallback options
 
-# Use a dictionary for default options
-default_options = {"Bitcoin": "BTCUSDT", "Ethereum": "ETHUSDT"}
-# Initialize session state for crypto options if it doesn't exist
-if 'crypto_options' not in st.session_state:
-    st.session_state.crypto_options = default_options
 
 @RateLimiter(max_calls=5, period=60)  # 5 calls per minute
 def import_binance_data(symbol, start_date, end_date, interval='1d', contract='spot'):
@@ -381,6 +423,24 @@ def plot_signals_and_price(df, ticker):
     
     return fig
 
+def display_rules():
+    st.markdown("""
+    ## Strategy
+
+    **IMPORTANT: Read the disclaimer at the end of page carefully before using this application.**
+
+    1. The strategy backtested here is a momentum, or trend-following strategy. The rules are simple:
+    - A regime filter is applied based on BTC: if BTC Close > BTC MA(N): bull market. Else: bear market, the strategy stays in cash
+    - If the regime filter is bullish, we take a long position on a coin if: Coin Close > Coin MA(M). If the regime turns bearish or Coin Close < Coin MA(N): we exit the position.
+
+    2. A positon is taken 1 bar after a signal is observed, to avoid any look-ahead bias.
+
+    3. The market data is provided by the Binance API. US residents are forbidden from using this API and therefore, this application.
+
+
+    By using this application, you acknowledge that you have read, understood, and agree to the terms and conditions at the end of the page.
+    """)
+
 def display_disclaimer():
     st.markdown("""
     ## Disclaimer and Terms of Use
@@ -405,43 +465,58 @@ def display_disclaimer():
     """)
 
 
-# Main app logic
-try:
-    st.markdown("<h1 class='pink-title'>QuantiFi Momentum Crypto Dashboard</h1>", unsafe_allow_html=True)
+# Initialize session state variables
+if 'run_backtest' not in st.session_state:
+    st.session_state.run_backtest = False
 
-    display_disclaimer()
+st.session_state.crypto_options = initialize_crypto_options()
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        selected_crypto = st.selectbox('Select a cryptocurrency', list(st.session_state.crypto_options.keys()))
-    with col2:
-        contract = st.selectbox('Contract Type', ['spot', 'futures'])
-    with col3:
-        interval = st.selectbox('Data Frequency', ['1d', '4h', '1h'])
+def run_backtest_clicked():
+    st.session_state.run_backtest = True
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        start_date = st.date_input('Start Date', datetime(2020, 1, 1))
-    with col2:
-        end_date = st.date_input('End Date', datetime.now())
-    with col3:
-        btc_window = st.number_input('Regime Filter Window (# of bars)', min_value=1, max_value=500, value=100)
-    with col4:
-        coin_window = st.number_input('Coin-specific Window (# of bars)', min_value=1, max_value=500, value=50)
-    
-    errors = validate_inputs(start_date, end_date, btc_window, coin_window)
+# Main app layout
+st.markdown("<h1 class='pink-title'>QuantiFi Momentum Crypto Dashboard</h1>", unsafe_allow_html=True)
 
-    if errors:
-        for error in errors:
-            st.error(error)
-        st.stop()
+display_rules()
 
-    if st.button('Run Backtest'):
-        with st.spinner('Fetching top cryptocurrencies...'):
-            st.session_state.crypto_options = fetch_top_50_cryptos()
+
+# Input section
+col1, col2, col3 = st.columns(3)
+with col1:
+    selected_crypto = st.selectbox('Select a cryptocurrency', list(st.session_state.crypto_options.keys()))
+with col2:
+    contract = st.selectbox('Contract Type', ['spot', 'futures'])
+with col3:
+    interval = st.selectbox('Data Frequency', ['1d', '4h', '1h'])
+
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    start_date = st.date_input('Start Date', datetime(2020, 1, 1))
+with col2:
+    end_date = st.date_input('End Date', datetime.now())
+with col3:
+    btc_window = st.number_input('Regime Filter Window (# of bars)', min_value=1, max_value=500, value=100)
+with col4:
+    coin_window = st.number_input('Coin-specific Window (# of bars)', min_value=1, max_value=500, value=50)
+
+errors = validate_inputs(start_date, end_date, btc_window, coin_window)
+
+if errors:
+    for error in errors:
+        st.error(error)
+else:
+    st.button('Run Backtest', on_click=run_backtest_clicked)
+
+#if st.button("Refresh Crypto Options"):
+#    logger.info("Manually refreshing crypto options")
+#    st.session_state.crypto_options = initialize_crypto_options()
+#    st.experimental_rerun()
+
+# Processing section (only runs when the button is clicked)
+if st.session_state.run_backtest:
+    try:
         
-        # Use the fetched options or fall back to the default if there was an error
-        ticker = st.session_state.crypto_options.get(selected_crypto, default_options.get(selected_crypto))
+        ticker = st.session_state.crypto_options.get(selected_crypto, st.session_state.crypto_options.get("Bitcoin"))
         
         with st.spinner('Fetching data...'):
             df = import_binance_data(ticker, start_date, end_date, interval, contract)
@@ -484,8 +559,9 @@ try:
                 st.warning("Unable to calculate signals. Please try different parameters or a different cryptocurrency.")
         else:
             st.warning("No data available for the selected parameters. Please try a different cryptocurrency, date range, or contract type.")
+    except Exception as e:
+        handle_error(e)
+    finally:
+        st.session_state.run_backtest = False
 
-except Exception as e:
-    handle_error(e)
-
-st.write("Note: This app uses a simple momentum strategy based on moving averages. The strategy parameters are measured in bars, not days. Always do your own research before making investment decisions. None of this is financial advice.")
+display_disclaimer()
