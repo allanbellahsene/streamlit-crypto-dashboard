@@ -44,9 +44,11 @@ def setup_binance_client():
         st.stop()
     
     try:
-        client = Client(api_key, api_secret)
+        client = Client(api_key, api_secret, tld='com')
+        client.API_URL = 'https://data.binance.com/api'  # Change the base URL
+        
         # Perform a simple API call to test the connection
-        client.get_account()
+        client.get_exchange_info()
         return client
     except Exception as e:
         st.error(f"Failed to initialize Binance client. Please check your API keys. Error: {str(e)}")
