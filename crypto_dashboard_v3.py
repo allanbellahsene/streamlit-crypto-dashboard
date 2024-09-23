@@ -173,8 +173,26 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@lru_cache(maxsize=1)
-def get_top_50_cryptos():
+class RateLimitException(Exception):
+    pass
+
+def rate_limited_request(url, params=None, max_retries=3, cooldown=60):
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            return response.json()
+        except RequestException as e:
+            if response.status_code == 429:
+                if attempt < max_retries - 1:
+                    time.sleep(cooldown)
+                else:
+                    raise RateLimitException("Rate limit exceeded after max retries")
+            else:
+                raise e
+
+@st.cache_data(ttl=3600)  # Cache the result for 1 hour
+def fetch_top_50_cryptos():
     try:
         url = "https://api.coingecko.com/api/v3/coins/markets"
         params = {
@@ -387,12 +405,12 @@ try:
 
     display_disclaimer()
 
-    crypto_options = get_top_50_cryptos()
+    # Use a dictionary for default options
+    default_options = {"Bitcoin": "BTCUSDT", "Ethereum": "ETHUSDT"}
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        selected_crypto = st.selectbox('Select a cryptocurrency', list(crypto_options.keys()))
-        ticker = crypto_options[selected_crypto]
+        selected_crypto = st.selectbox('Select a cryptocurrency', list(default_options.keys()))
     with col2:
         contract = st.selectbox('Contract Type', ['spot', 'futures'])
     with col3:
@@ -416,6 +434,12 @@ try:
         st.stop()
 
     if st.button('Run Backtest'):
+        # Only fetch the top 50 cryptos when the button is pressed
+        crypto_options = fetch_top_50_cryptos()
+        
+        # Use the fetched options or fall back to the default if there was an error
+        ticker = crypto_options.get(selected_crypto, default_options.get(selected_crypto))
+        
         with st.spinner('Fetching data...'):
             df = import_binance_data(ticker, start_date, end_date, interval, contract)
         
