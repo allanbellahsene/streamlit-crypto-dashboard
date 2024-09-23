@@ -1,0 +1,198 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environment
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# Environments
+.env
+.envrc
+*.env
+*.env.*
+
+# dotenv
+*.dotenv
+
+# Pyre type checker
+.pyre/
+
+# MyPy type checker
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pytest
+.cache/
+.pytest_cache/
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# VS Code
+.vscode/
+.history/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# pytest
+.cache/
+
+# PEP 582; used by e.g. python-pnpm
+__pypackages__/
+
+# Cython debug symbols
+cython_debug/
+
+# Translations
+*.mo
+*.pot
+
+# Sphinx documentation
+docs/_build/
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# PyBuilder
+target/
+
+# Jupyter Notebook config
+.jupyter/
+
+# IPython
+.profile_default/
+ipython_config.py
+
+# Pylint
+pylint.log
+
+# macOS files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# macOS resource forks
+._*
+
+# Thumbnails
+.Thumbnails
+
+# Trash folder
+.Trashes
+
+# Files that might contain sensitive data
+*.pem
+*.key
+*.crt
+*.csr
+
+# Log files
+*.log
+*.log.*
+
+# SQLite databases
+*.sqlite3
+
+# Streamlit credentials and cache
+~/.streamlit/credentials.toml
+~/.streamlit/secrets.toml
+~/.streamlit/config.toml
+**/.streamlit/
+
+# Editor backup files
+*~
+
+# Python egg metadata
+*.egg-info/
+.eggs/
+
+# Compiled code
+*.o
+*.pyc
+*.pyo
+
+# Test output
+test_results/
+
+# AWS credentials
+.aws/credentials
+
+# Local configurations
+config.yaml
+config.yml
+
+# Anaconda
+.conda/
