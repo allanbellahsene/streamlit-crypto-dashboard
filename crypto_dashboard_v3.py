@@ -8,30 +8,12 @@ from binance.client import Client
 import requests
 import re
 import os
-from dotenv import load_dotenv
 import traceback
 import logging
 import hashlib
 from functools import wraps
 import time
 from functools import lru_cache
-import sys
-import subprocess
-
-st.write(f"Python version: {sys.version}")
-st.write(f"Python executable: {sys.executable}")
-
-if sys.version_info < (3, 9):
-    st.error("This app requires Python 3.9 or newer. Please update your Python version.")
-    st.stop()
-
-def install(package):
-    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-try:
-    import setuptools
-except ImportError:
-    install('setuptools')
 
 logging.basicConfig(filename='app.log', level=logging.ERROR)
 
@@ -52,10 +34,10 @@ class RateLimiter:
             return func(*args, **kwargs)
         return wrapped
 
+
 def setup_binance_client():
-    load_dotenv()
-    api_key = os.getenv("BINANCE_API_KEY")
-    api_secret = os.getenv("BINANCE_PRIVATE_KEY")
+    api_key = st.secrets["BINANCE_API_KEY"]
+    api_secret = st.secrets["BINANCE_PRIVATE_KEY"]
     
     if not api_key or not api_secret:
         st.error("Binance API keys are missing. Please set BINANCE_API_KEY and BINANCE_PRIVATE_KEY in your .env file.")
